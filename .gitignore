@@ -1,0 +1,6 @@
+.venv/
+recordings/
+__pycache__/
+*.pyc
+*.mkv
+*.csv
