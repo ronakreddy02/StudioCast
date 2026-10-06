@@ -50,10 +50,11 @@ Temporary MKV Files
 Final Composition
     ↓
 final.mp4
+```
 
+## Project Structure
 
-## Project Architecture
-
+```text
 STUDIOCAST/
 ├── app/
 │   ├── main.py
@@ -68,6 +69,7 @@ STUDIOCAST/
 │   └── ffmpeg/
 ├── .gitignore
 └── README.md
+```
 
 ## How to Run
 
@@ -77,9 +79,38 @@ Open PowerShell in the StudioCast project folder:
 
 ```powershell
 cd "C:\Users\padma\OneDrive\Desktop\STUDIOCAST"
+```
 
-Activate the virtual environment
+### 2. Activate the virtual environment
+
+```powershell
 .\.venv\Scripts\Activate.ps1
+```
 
-Run StudioCast
+### 3. Run StudioCast
+
+```powershell
 python -m app.main
+```
+
+## Requirements
+
+- Windows
+- Python
+- PySide6
+- FFmpeg
+- FFprobe
+- VB-Audio Virtual Cable for system-audio capture
+
+## FFmpeg
+
+StudioCast uses FFmpeg for media capture and final video processing.
+
+The application is configured to use:
+
+```text
+vendor/ffmpeg/ffmpeg.exe
+```
+
+FFmpeg executable files are excluded from the Git repository using `.gitignore`.
+
