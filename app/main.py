@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtWidgets import QApplication
-from ui.recording_window import RecordingWindow
+from app.ui.recording_window import RecordingWindow
 
 
 def main():

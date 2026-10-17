@@ -1,6 +1,20 @@
+# Python virtual environment
 .venv/
-recordings/
+
+# Python cache
 __pycache__/
 *.pyc
+
+# Recording outputs
+recordings/
 *.mkv
-*.csv
+
+# CSV packet-debugging files are kept locally but excluded from Git
+
+# Large FFmpeg binaries (keep locally, don't upload to GitHub)
+vendor/ffmpeg/*.exe
+
+# Temporary packet-debugging files
+mic_packets.csv
+system_packets.csv
+webcam_packets.csv
