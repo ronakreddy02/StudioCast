@@ -587,3 +587,9 @@ class RecordingWindow(QWidget):
 
         self.pause_button.setEnabled(True)
         self.resume_button.setEnabled(False)
+
+    def closeEvent(self, event):
+        if hasattr(self, "hotkeys"):
+            self.hotkeys.stop()
+
+        event.accept()
