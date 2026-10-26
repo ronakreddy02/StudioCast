@@ -1,3 +1,4 @@
+import ctypes
 from app.controllers.hotkey_controller import HotkeyController
 from app.ui.window_selector import WindowSelector
 from app.ui.region_selector import RegionSelector
@@ -444,7 +445,14 @@ class RecordingWindow(QWidget):
             # Full Screen
             self.selected_region = None
             self.selected_window = None
-            region = None
+
+            user32 =ctypes.windll.user32
+            region = {
+                "x": 0,
+                "y": 0,
+                "width": user32.GetSystemMetrics(0),
+                "height": user32.GetSystemMetrics(1),
+            }
 
         # Start recording
         result = self.controller.start(
