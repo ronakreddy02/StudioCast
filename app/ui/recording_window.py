@@ -6,6 +6,7 @@ from app.controllers.recording_controller import RecordingController
 
 from PySide6.QtCore import QTimer, Qt, Slot
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QMessageBox,
 )
 
 
@@ -84,6 +86,10 @@ class RecordingWindow(QWidget):
         self.is_recording = False
         self.elapsed_time = 0
         self.is_paused = False
+        self._capture_failure = None 
+        self._close_after_finalization = False
+        self._allow_close = False
+
 
         # Timers
         self.timer = QTimer(self)
@@ -416,14 +422,12 @@ class RecordingWindow(QWidget):
 
         area = self.area.currentText()
 
-        # Recording area selection
+        # Select the region to record
         if area == "Selected Area":
             self.selected_window = None
 
             if self.selected_region is None:
-                self.status.setText(
-                    "Select the screen region to record."
-                )
+                self.status.setText("Select the screen region to record.")
                 self.select_region()
                 return
 
@@ -433,20 +437,18 @@ class RecordingWindow(QWidget):
             self.selected_region = None
 
             if self.selected_window is None:
-                self.status.setText(
-                    "Select the window to record."
-                )
+                self.status.setText("Select the window to record.")
                 self.select_window()
                 return
 
             region = self.selected_window
 
         else:
-            # Full Screen
+            # Use the full display
             self.selected_region = None
             self.selected_window = None
 
-            user32 =ctypes.windll.user32
+            user32 = ctypes.windll.user32
             region = {
                 "x": 0,
                 "y": 0,
@@ -454,7 +456,39 @@ class RecordingWindow(QWidget):
                 "height": user32.GetSystemMetrics(1),
             }
 
+        # Check devices, disk space, and the session folder
+        preflight = self.controller.preflight_recording(
+            record_screen,
+            record_webcam,
+            record_microphone,
+            record_system_audio
+        )
+
+        if preflight["error"]:
+            self.status.setText(preflight["error"])
+            return
+
+        if preflight["warning"]:
+            answer = QMessageBox.warning(
+                self,
+                "Low disk space",
+                preflight["warning"],
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+
+            if answer != QMessageBox.StandardButton.Yes:
+                self.status.setText("Recording cancelled.")
+                return
         # Start recording
+        self._capture_failure = None
+        
+        self.status.setText(
+            "Preparing sources... start playback when Recording appears."
+        )
+
+        QApplication.processEvents()
         result = self.controller.start(
             record_screen,
             record_webcam,
@@ -464,7 +498,10 @@ class RecordingWindow(QWidget):
         )
 
         if result is not True:
-            self.status.setText("Could not start recording.")
+            self.status.setText(
+                self.controller.wrapper.start_error
+                or "Could not start recording."
+            )
             return
 
         self.is_recording = True
@@ -542,9 +579,30 @@ class RecordingWindow(QWidget):
     @Slot(bool)
     def on_finalization_finished(self, result):
 
-        if result:
+        if self._capture_failure:
+            if result:
+                self.status.setText(
+                    f"{self._capture_failure} Other captured files were finalized."
+                )
+            else:
+                self.status.setText(
+                    f"{self._capture_failure} Finalization also failed; temporary files were kept."
+                )
+            self._capture_failure = None
+
+        elif result and self.controller.wrapper.duration_warning:
+            self.status.setText(
+                "Recording saved, but "
+                f"{self.controller.wrapper.duration_warning}"
+            )
+
+
+        elif result:
+
             self.status.setText("Recording saved successfully.")
+
         else:
+
             self.status.setText(
                 "Finalization failed. Temporary files kept for recovery."
             )
@@ -559,12 +617,17 @@ class RecordingWindow(QWidget):
         self.is_recording = False
         self.is_paused = False
 
-    @Slot()
-    def on_process_failed(self):
+        if self._close_after_finalization:
+            self._close_after_finalization = False
+            self._allow_close = True
+            QTimer.singleShot(0, self.close)
+
+    @Slot(str, str)
+    def on_process_failed(self, source, message):
         self.process_monitor_timer.stop()
-        self.status.setText(
-            "Warning: A recording process stopped unexpectedly."
-        )
+        source_name = source.replace("_", " ").title()
+        self._capture_failure = f"{source_name} capture failed: {message}"
+        self.stop_recording()
 
     def pause_recording(self):
 
@@ -586,7 +649,19 @@ class RecordingWindow(QWidget):
         if not self.is_recording or not self.is_paused:
             return
 
-        self.controller.resume_recording()
+        try:
+            resumed = self.controller.resume_recording()
+        except Exception as error:
+            self.status.setText(f"Could not resume capture: {error}")
+            return
+
+        if resumed is False:
+            self.status.setText(
+                self.controller.wrapper.start_error
+                or "Capture sources could not resume."
+            )
+            return
+
         self.is_paused = False
 
         self.timer.start(1000)
@@ -597,7 +672,25 @@ class RecordingWindow(QWidget):
         self.resume_button.setEnabled(False)
 
     def closeEvent(self, event):
+        if self._allow_close:
+            event.accept()
+            return
+
         if hasattr(self, "hotkeys"):
             self.hotkeys.stop()
+
+        controller = getattr(self, "controller", None)
+
+        if self.is_recording:
+            self._close_after_finalization = True
+            event.ignore()
+            self.stop_recording()
+            return
+
+        if controller is not None and controller.is_finalizing:
+            self._close_after_finalization = True
+            self.status.setText("Finishing recording before closing...")
+            event.ignore()
+            return
 
         event.accept()

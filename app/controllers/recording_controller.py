@@ -1,4 +1,4 @@
-
+from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from media.ffmpeg import FFmpegWrapper
@@ -26,7 +26,7 @@ class FinalizationWorker(QObject):
 class RecordingController(QObject):
 
     finalization_finished = Signal(bool)
-    process_failed = Signal()
+    process_failed = Signal(str, str)
 
     def __init__(self):
         super().__init__()
@@ -38,6 +38,21 @@ class RecordingController(QObject):
 
         self.finalization_thread = None
         self.finalization_worker = None
+
+    def preflight_recording(
+        self,
+        record_screen,
+        record_webcam,
+        record_microphone,
+        record_system_audio
+    ):
+        # Run checks before starting FFmpeg
+        return self.wrapper.preflight_recording(
+            record_screen,
+            record_webcam,
+            record_microphone,
+            record_system_audio
+        )
 
     def start(self, record_screen, record_webcam,
               record_microphone, record_system_audio,region=None):
@@ -134,34 +149,69 @@ class RecordingController(QObject):
         self.wrapper.pause_recording()
 
     def resume_recording(self):
-        self.wrapper.resume_recording()
+        return self.wrapper.resume_recording()
 
         
     def check_processes(self):
-
         if not self.is_recording or self.is_finalizing:
             return
 
         for process in self.wrapper.processes:
             exit_code = process.poll()
 
-            if exit_code is not None:
-                print(
-                    "Warning: An FFmpeg recording process "
-                    "has stopped unexpectedly"
+            if exit_code is None:
+                continue
+
+            details = self.wrapper.process_details.get(process.pid, {})
+            source = details.get("source", "recording")
+            log_path = details.get("log_path")
+            log_text = ""
+
+            if log_path:
+                try:
+                    log_text = Path(log_path).read_text(
+                        encoding="utf-8",
+                        errors="replace"
+                    )[-5000:]
+                except OSError as error:
+                    print(f"Could not read FFmpeg log for {source}: {error}")
+
+            lowered = log_text.lower()
+
+            if any(text in lowered for text in (
+                "no space left",
+                "disk full",
+                "not enough space",
+            )):
+                message = "Disk is full."
+            elif "permission denied" in lowered or "access is denied" in lowered:
+                message = "Permission was denied."
+            elif any(text in lowered for text in (
+                "device or resource busy",
+                "device busy",
+                "already in use",
+                "used by another process",
+            )):
+                message = "The device is busy or already in use."
+            elif any(text in lowered for text in (
+                "no such device",
+                "could not find",
+                "cannot find",
+                "does not exist",
+            )):
+                message = "The selected device could not be found."
+            else:
+                useful_lines = [
+                    line.strip()
+                    for line in log_text.splitlines()
+                    if line.strip()
+                ]
+                message = (
+                    useful_lines[-1][:300]
+                    if useful_lines
+                    else f"Capture process exited with code {exit_code}."
                 )
-                print(f"FFmpeg process ID: {process.pid}")
-                print(f"FFmpeg exit code: {exit_code}")
 
-                if process.stderr:
-                    try:
-                        error_output = process.stderr.read()
-                        if error_output:
-                            print("FFmpeg error output:")
-                            print(error_output)
-                    except Exception as error:
-                        print(f"Could not read FFmpeg error: {error}")
-
-                self.process_failed.emit()
-                return
-
+            print(f"{source} capture failed: {message}")
+            self.process_failed.emit(source, message)
+            return
